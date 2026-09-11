@@ -1,0 +1,11 @@
+{
+  "name": "career-guide",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix CareerGuideComp run dev",
+    "build": "npm --prefix CareerGuideComp run build",
+    "install:frontend": "npm --prefix CareerGuideComp install"
+  }
+}
