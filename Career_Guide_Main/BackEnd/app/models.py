@@ -6,6 +6,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     TIMESTAMP,
@@ -34,11 +35,15 @@ class User(Base):
         "StudentProfile",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     counselor_profile = relationship(
         "Counselor",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     student_conversations = relationship(
@@ -46,28 +51,66 @@ class User(Base):
         foreign_keys="Conversation.student_id",
         back_populates="student",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     counselor_conversations = relationship(
         "Conversation",
         foreign_keys="Conversation.counselor_id",
         back_populates="counselor",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     sent_messages = relationship(
         "Message",
         back_populates="sender",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     assessment_attempts = relationship(
         "AssessmentAttempt",
         back_populates="student",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     recommendations = relationship(
         "Recommendation",
         back_populates="student",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    student_sessions = relationship(
+        "SessionBooking",
+        foreign_keys="SessionBooking.student_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    counselor_sessions = relationship(
+        "SessionBooking",
+        foreign_keys="SessionBooking.counselor_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    hosted_webinars = relationship(
+        "Webinar",
+        foreign_keys="Webinar.counselor_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    webinar_registrations = relationship(
+        "WebinarRegistration",
+        foreign_keys="WebinarRegistration.student_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    feedback_entries = relationship(
+        "Feedback",
+        foreign_keys="Feedback.user_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -127,6 +170,7 @@ class Article(Base):
     )
     created_at = Column(TIMESTAMP, server_default=func.now())
 
+
 class CareerCategory(Base):
     __tablename__ = "career_categories"
 
@@ -134,6 +178,7 @@ class CareerCategory(Base):
     name = Column(String(100), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+
 
 class SessionBooking(Base):
     __tablename__ = "sessions"
@@ -179,6 +224,7 @@ class AssessmentAttempt(Base):
         "Recommendation",
         back_populates="assessment_attempt",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -254,6 +300,7 @@ class Conversation(Base):
         "Message",
         back_populates="conversation",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="Message.created_at",
     )
 
@@ -279,6 +326,7 @@ class Message(Base):
 
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="sent_messages")
+
 
 class Webinar(Base):
     __tablename__ = "webinars"
@@ -317,12 +365,14 @@ class Webinar(Base):
     counselor = relationship(
         "User",
         foreign_keys=[counselor_id],
+        back_populates="hosted_webinars",
     )
     category = relationship("CareerCategory")
     registrations = relationship(
         "WebinarRegistration",
         back_populates="webinar",
         cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -351,7 +401,9 @@ class WebinarRegistration(Base):
     student = relationship(
         "User",
         foreign_keys=[student_id],
-    )   
+        back_populates="webinar_registrations",
+    )
+
 
 class Feedback(Base):
     __tablename__ = "feedback"
@@ -386,5 +438,41 @@ class Feedback(Base):
     user = relationship(
         "User",
         foreign_keys=[user_id],
+        back_populates="feedback_entries",
     )
 
+
+class CareerRoadmap(Base):
+    __tablename__ = "career_roadmaps"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    student_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    recommendation_id = Column(
+        Integer,
+        ForeignKey("recommendations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    career_title = Column(String(150), nullable=False)
+
+    roadmap_json = Column(
+        JSON,
+        nullable=False,
+    )
+
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    updated_at = Column(
+        TIMESTAMP,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

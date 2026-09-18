@@ -26,7 +26,8 @@ type Tab =
   | "saved"
   | "chat"
   | "webinars"
-  | "feedback";
+  | "feedback"
+  | "account";
 
 type SessionBooking = {
   id: number;
@@ -55,6 +56,39 @@ type CareerRecommendation = {
 type RoadmapStep = {
   title: string;
   description: string;
+};
+type DetailedRoadmapStage = {
+  stage_number: number;
+  title: string;
+  timeframe: string;
+  goal: string;
+  actions: string[];
+  deliverable: string;
+  readiness_check: string;
+};
+
+type DetailedRoadmap = {
+  career_title: string;
+  career_goal: string;
+  starting_point: string;
+  estimated_total_duration: string;
+  first_7_days: string[];
+  stages: DetailedRoadmapStage[];
+  portfolio_projects: string[];
+  free_or_low_cost_resources: string[];
+  common_mistakes: string[];
+  next_best_action: string;
+  local_requirements_note: string;
+};
+
+type DetailedRoadmapResponse = {
+  id: number;
+  student_id: number;
+  recommendation_id: number;
+  career_title: string;
+  roadmap: DetailedRoadmap;
+  created_at: string;
+  updated_at: string;
 };
 type Webinar = {
   id: number;
@@ -88,7 +122,7 @@ type FeedbackItem = {
 };
 
 export function StudentDashboard() {
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();;
 
   const [activeTab, setActiveTab] = useState<Tab>("ai-guide");
   const [bookings, setBookings] = useState<SessionBooking[]>([]);
@@ -201,7 +235,45 @@ export function StudentDashboard() {
       setCancellingId(null);
     }
   }
+  async function deleteMyAccount() {
+  if (!token) {
+    window.alert("Your login session has expired. Please log in again.");
+    return;
+  }
 
+  const confirmed = window.confirm(
+    "Delete your CareerGuide account permanently?\n\n" +
+      "Your profile and related personal data will be removed. " +
+      "This action cannot be undone."
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || "Could not delete your account.");
+    }
+
+    window.alert("Your account has been deleted.");
+    logout();
+  } catch (error) {
+    window.alert(
+      error instanceof Error
+        ? error.message
+        : "Could not delete your account."
+    );
+  }
+}
   const navigationItems: {
     id: Tab;
     name: string;
@@ -214,6 +286,7 @@ export function StudentDashboard() {
     { id: "chat", name: "Counselor Chat", icon: MessageSquare },
     { id: "webinars", name: "Webinars", icon: Video },
     { id: "feedback", name: "Send Feedback", icon: MessageSquarePlus },
+    { id: "account", name: "Account Settings", icon: GraduationCap },
   ];
 
   return (
@@ -279,6 +352,9 @@ export function StudentDashboard() {
 )}
 {activeTab === "webinars" && <StudentWebinarsView token={token} />}
 {activeTab === "feedback" && <StudentFeedbackView token={token} />}
+{activeTab === "account" && (
+  <StudentAccountView onDeleteAccount={deleteMyAccount} />
+)}
       </main>
     </div>
   );
@@ -458,6 +534,14 @@ function AIGuideView({ token }: { token: string | null }) {
   const [recommendations, setRecommendations] = useState<
     CareerRecommendation[]
   >([]);
+  const [detailedRoadmap, setDetailedRoadmap] =
+  useState<DetailedRoadmapResponse | null>(null);
+
+  const [isRoadmapLoading, setIsRoadmapLoading] = useState(false);
+
+  const [isRoadmapGenerating, setIsRoadmapGenerating] = useState(false);
+
+  const [roadmapError, setRoadmapError] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [selectingId, setSelectingId] = useState<number | null>(null);
@@ -861,6 +945,14 @@ function RoadmapsView({ token }: { token: string | null }) {
   const [topCareer, setTopCareer] = useState<CareerRecommendation | null>(
     null
   );
+  const [detailedRoadmap, setDetailedRoadmap] =
+  useState<DetailedRoadmapResponse | null>(null);
+
+  const [isRoadmapLoading, setIsRoadmapLoading] = useState(false);
+
+  const [isRoadmapGenerating, setIsRoadmapGenerating] = useState(false);
+
+  const [roadmapError, setRoadmapError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -904,10 +996,98 @@ setTopCareer(selectedCareer || recommendations[0] || null);
       setLoading(false);
     }
   }, [token]);
+  const loadSavedRoadmap = useCallback(
+  async (recommendationId: number) => {
+    if (!token) {
+      return;
+    }
 
+    setIsRoadmapLoading(true);
+    setRoadmapError("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/recommendations/${recommendationId}/roadmap`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (response.status === 404) {
+        setDetailedRoadmap(null);
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not load the saved roadmap.");
+      }
+
+      setDetailedRoadmap(data as DetailedRoadmapResponse);
+    } catch (error) {
+      setRoadmapError(
+        error instanceof Error
+          ? error.message
+          : "Could not load the saved roadmap.",
+      );
+    } finally {
+      setIsRoadmapLoading(false);
+    }
+  },
+  [token],
+);
+const generateDetailedRoadmap = async (recommendationId: number) => {
+  if (!token) {
+    setRoadmapError("Please sign in again before generating a roadmap.");
+    return;
+  }
+
+  setIsRoadmapGenerating(true);
+  setRoadmapError("");
+
+  try {
+    const response = await fetch(
+      `${API_URL}/recommendations/${recommendationId}/roadmap`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Could not generate the detailed roadmap.");
+    }
+
+    setDetailedRoadmap(data as DetailedRoadmapResponse);
+  } catch (error) {
+    setRoadmapError(
+      error instanceof Error
+        ? error.message
+        : "Could not generate the detailed roadmap.",
+    );
+  } finally {
+    setIsRoadmapGenerating(false);
+  }
+};
   useEffect(() => {
-    loadTopCareer();
-  }, [loadTopCareer]);
+  loadTopCareer();
+}, [loadTopCareer]);
+
+useEffect(() => {
+  if (topCareer?.is_selected) {
+    loadSavedRoadmap(topCareer.id);
+  } else {
+    setDetailedRoadmap(null);
+    setRoadmapError("");
+  }
+}, [topCareer, loadSavedRoadmap]);
 
   if (loading) {
     return (
@@ -971,38 +1151,195 @@ setTopCareer(selectedCareer || recommendations[0] || null);
 </p>
         </div>
 
-        <button
-          onClick={() => window.print()}
-          className="flex items-center justify-center gap-2 border bg-white px-4 py-2 rounded-lg text-sm hover:bg-gray-50"
-        >
-          <Download className="w-4 h-4" />
-          Print Roadmap
-        </button>
-      </div>
+        <div className="flex flex-wrap items-center gap-3">
+  {!detailedRoadmap && topCareer.is_selected && (
+    <button
+      onClick={() => generateDetailedRoadmap(topCareer.id)}
+      disabled={isRoadmapGenerating || isRoadmapLoading}
+      className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+    >
+      <Sparkles className="h-4 w-4" />
+      {isRoadmapGenerating
+        ? "Generating your roadmap..."
+        : "Generate Detailed AI Roadmap"}
+    </button>
+  )}
 
+  <button
+    onClick={() => window.print()}
+    className="flex items-center justify-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm hover:bg-gray-50"
+  >
+    <Download className="h-4 w-4" />
+    Print Roadmap
+  </button>
+</div>
+      </div>
+      {roadmapError && (
+  <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+    {roadmapError}
+  </div>
+)}
       <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
         <strong>Why this path:</strong> {topCareer.reason}
       </div>
 
-      <div className="space-y-4">
-        {roadmap.map((step, index) => (
-          <div
-            key={step.title}
-            className="bg-white rounded-xl border border-gray-200 p-5 flex gap-4"
-          >
-            <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shrink-0">
-              {index + 1}
-            </span>
+      {isRoadmapLoading ? (
+  <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+    Loading your saved detailed roadmap...
+  </div>
+) : detailedRoadmap ? (
+  <div className="space-y-6">
+    <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
+      <h2 className="text-xl font-bold text-gray-900">
+        {detailedRoadmap.roadmap.career_goal}
+      </h2>
 
-            <div>
-              <h2 className="font-bold text-gray-900">{step.title}</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                {step.description}
-              </p>
-            </div>
-          </div>
+      <p className="mt-2 text-sm text-gray-700">
+        <strong>Starting point:</strong>{" "}
+        {detailedRoadmap.roadmap.starting_point}
+      </p>
+
+      <p className="mt-2 text-sm text-gray-700">
+        <strong>Estimated duration:</strong>{" "}
+        {detailedRoadmap.roadmap.estimated_total_duration}
+      </p>
+    </div>
+
+    <div className="rounded-xl border border-green-200 bg-green-50 p-5">
+      <h2 className="text-lg font-bold text-green-900">
+        Your first 7 days
+      </h2>
+
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-green-900">
+        {detailedRoadmap.roadmap.first_7_days.map((action) => (
+          <li key={action}>{action}</li>
         ))}
+      </ul>
+    </div>
+
+    <div className="space-y-4">
+      {detailedRoadmap.roadmap.stages.map((stage) => (
+        <div
+          key={stage.stage_number}
+          className="rounded-xl border border-gray-200 bg-white p-5"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                Stage {stage.stage_number} · {stage.timeframe}
+              </p>
+
+              <h2 className="mt-1 text-lg font-bold text-gray-900">
+                {stage.title}
+              </h2>
+            </div>
+
+            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+              {stage.timeframe}
+            </span>
+          </div>
+
+          <p className="mt-3 text-sm text-gray-700">{stage.goal}</p>
+
+          <h3 className="mt-4 text-sm font-bold text-gray-900">
+            Actions
+          </h3>
+
+          <ul className="mt-2 list-disc space-y-2 pl-5 text-sm text-gray-700">
+            {stage.actions.map((action) => (
+              <li key={action}>{action}</li>
+            ))}
+          </ul>
+
+          <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
+            <p>
+              <strong>Deliverable:</strong> {stage.deliverable}
+            </p>
+
+            <p className="mt-2">
+              <strong>Readiness check:</strong> {stage.readiness_check}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="grid gap-5 md:grid-cols-2">
+      <div className="rounded-xl border border-purple-200 bg-purple-50 p-5">
+        <h2 className="text-lg font-bold text-purple-900">
+          Portfolio projects
+        </h2>
+
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-purple-900">
+          {detailedRoadmap.roadmap.portfolio_projects.map((project) => (
+            <li key={project}>{project}</li>
+          ))}
+        </ul>
       </div>
+
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <h2 className="text-lg font-bold text-amber-900">
+          Common mistakes to avoid
+        </h2>
+
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-amber-900">
+          {detailedRoadmap.roadmap.common_mistakes.map((mistake) => (
+            <li key={mistake}>{mistake}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-5">
+      <h2 className="text-lg font-bold text-cyan-900">
+        Free or low-cost resources
+      </h2>
+
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-cyan-900">
+        {detailedRoadmap.roadmap.free_or_low_cost_resources.map(
+          (resource) => (
+            <li key={resource}>{resource}</li>
+          ),
+        )}
+      </ul>
+    </div>
+
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+      <h2 className="text-lg font-bold text-blue-900">
+        Next best action
+      </h2>
+
+      <p className="mt-2 text-sm text-blue-900">
+        {detailedRoadmap.roadmap.next_best_action}
+      </p>
+    </div>
+
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+      {detailedRoadmap.roadmap.local_requirements_note}
+    </div>
+  </div>
+) : (
+  <div className="space-y-4">
+    {roadmap.map((step, index) => (
+      <div
+        key={step.title}
+        className="flex gap-4 rounded-xl border border-gray-200 bg-white p-5"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">
+          {index + 1}
+        </span>
+
+        <div>
+          <h2 className="font-bold text-gray-900">{step.title}</h2>
+
+          <p className="mt-1 text-sm text-gray-600">
+            {step.description}
+          </p>
+        </div>
+      </div>
+    ))}
+  </div>
+)}
     </div>
   );
 }
@@ -2525,6 +2862,48 @@ function StudentFeedbackView({ token }: { token: string | null }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+function StudentAccountView({
+  onDeleteAccount,
+}: {
+  onDeleteAccount: () => Promise<void>;
+}) {
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Account Settings
+        </h1>
+        <p className="mt-1 text-gray-600">
+          Manage your CareerGuide account.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-red-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-red-700">
+          Danger Zone
+        </h2>
+
+        <p className="mt-2 text-sm leading-6 text-gray-600">
+          Deleting your account permanently removes your profile and related
+          CareerGuide data, including your career assessments, recommendations,
+          session bookings, webinar registrations, feedback, and messages.
+        </p>
+
+        <p className="mt-3 text-sm font-medium text-red-700">
+          This action cannot be undone.
+        </p>
+
+        <button
+          type="button"
+          onClick={onDeleteAccount}
+          className="mt-6 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+        >
+          Delete My Account
+        </button>
       </div>
     </div>
   );

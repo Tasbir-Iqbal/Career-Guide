@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.auth import get_current_user
 from app.database import get_db
-from app.gemini_service import generate_career_recommendations
+from app.gemini_service import (
+    generate_career_recommendations,
+    generate_detailed_roadmap,
+)
 
 
 router = APIRouter(
@@ -38,7 +41,16 @@ def recommendation_to_response(
         "is_selected": recommendation.is_selected,
         "generated_at": recommendation.generated_at,
     }
-
+def roadmap_to_response(roadmap: models.CareerRoadmap) -> dict:
+    return {
+        "id": roadmap.id,
+        "student_id": roadmap.student_id,
+        "recommendation_id": roadmap.recommendation_id,
+        "career_title": roadmap.career_title,
+        "roadmap": roadmap.roadmap_json,
+        "created_at": roadmap.created_at,
+        "updated_at": roadmap.updated_at,
+    }
 
 @router.post(
     "/generate",
@@ -235,3 +247,118 @@ def select_career_path(
     db.refresh(recommendation)
 
     return recommendation_to_response(recommendation)
+@router.post(
+    "/{recommendation_id}/roadmap",
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_roadmap(
+    recommendation_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can generate detailed career roadmaps.",
+        )
+
+    recommendation = (
+        db.query(models.Recommendation)
+        .filter(
+            models.Recommendation.id == recommendation_id,
+            models.Recommendation.student_id == current_user.id,
+            models.Recommendation.item_type == "career",
+            models.Recommendation.is_selected.is_(True),
+        )
+        .first()
+    )
+
+    if not recommendation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Selected career recommendation not found.",
+        )
+
+    assessment = (
+        db.query(models.AssessmentAttempt)
+        .filter(
+            models.AssessmentAttempt.id == recommendation.assessment_attempt_id,
+            models.AssessmentAttempt.student_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not assessment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The assessment for this career path was not found.",
+        )
+
+    existing_roadmap = (
+        db.query(models.CareerRoadmap)
+        .filter(
+            models.CareerRoadmap.recommendation_id == recommendation.id,
+            models.CareerRoadmap.student_id == current_user.id,
+        )
+        .first()
+    )
+
+    if existing_roadmap:
+        return roadmap_to_response(existing_roadmap)
+
+    try:
+        generated_roadmap = generate_detailed_roadmap(
+            career_title=recommendation.career_title or "Selected Career",
+            education_level=assessment.education_level or "",
+            interests=assessment.interests or "",
+            skills=assessment.skills or "",
+            favorite_subjects=assessment.favorite_subjects or "",
+            work_style=assessment.work_style or "",
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not generate detailed roadmap: {str(error)}",
+        ) from error
+
+    roadmap = models.CareerRoadmap(
+        student_id=current_user.id,
+        recommendation_id=recommendation.id,
+        career_title=generated_roadmap.career_title,
+        roadmap_json=generated_roadmap.model_dump(),
+    )
+    db.add(roadmap)
+    db.commit()
+    db.refresh(roadmap)
+
+    return roadmap_to_response(roadmap)
+@router.get(
+    "/{recommendation_id}/roadmap",
+)
+def get_saved_roadmap(
+    recommendation_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if current_user.role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can view detailed career roadmaps.",
+        )
+
+    roadmap = (
+        db.query(models.CareerRoadmap)
+        .filter(
+            models.CareerRoadmap.recommendation_id == recommendation_id,
+            models.CareerRoadmap.student_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not roadmap:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No detailed roadmap has been generated for this career path yet.",
+        )
+
+    return roadmap_to_response(roadmap)

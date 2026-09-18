@@ -24,7 +24,8 @@ type Tab =
   | "content"
   | "chat"
   | "webinars"
-  | "feedback";
+  | "feedback"
+  | "account";
 type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled";
 
 type CounselorSession = {
@@ -117,7 +118,7 @@ type FeedbackItem = {
 };
 
 export function CounselorDashboard() {
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("students");
   const [sessions, setSessions] = useState<CounselorSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -156,12 +157,53 @@ export function CounselorDashboard() {
     loadSessions();
   }, [loadSessions]);
 
+  async function deleteMyAccount() {
+  if (!token) {
+    window.alert("Your login session has expired. Please log in again.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Delete your CareerGuide counselor account permanently?\n\n" +
+      "Your profile and related personal data will be removed. " +
+      "Published articles may remain available without your name. " +
+      "This action cannot be undone."
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || "Could not delete your account.");
+    }
+
+    window.alert("Your counselor account has been deleted.");
+    logout();
+  } catch (error) {
+    window.alert(
+      error instanceof Error
+        ? error.message
+        : "Could not delete your account."
+    );
+  }
+}
   const navigation = [
     { id: "students" as Tab, name: "Session Requests", icon: Calendar },
     { id: "content" as Tab, name: "Manage Content", icon: FileText },
     { id: "chat" as Tab, name: "Messages", icon: MessageSquare },
     { id: "webinars" as Tab, name: "Webinars", icon: Video },
     { id: "feedback" as Tab, name: "Send Feedback", icon: MessageSquarePlus },
+    { id: "account" as Tab, name: "Account Settings", icon: Users },
   ];
 
   return (
@@ -224,6 +266,9 @@ export function CounselorDashboard() {
 
         {activeTab === "webinars" && <CounselorWebinarsView token={token} />}
         {activeTab === "feedback" && <CounselorFeedbackView token={token} />}
+        {activeTab === "account" && (
+  <CounselorAccountView onDeleteAccount={deleteMyAccount} />
+)}
       </main>
     </div>
   );
@@ -1897,6 +1942,49 @@ function CounselorFeedbackView({ token }: { token: string | null }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+function CounselorAccountView({
+  onDeleteAccount,
+}: {
+  onDeleteAccount: () => Promise<void>;
+}) {
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Account Settings
+        </h1>
+
+        <p className="mt-1 text-gray-600">
+          Manage your CareerGuide counselor account.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-red-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-red-700">
+          Danger Zone
+        </h2>
+
+        <p className="mt-2 text-sm leading-6 text-gray-600">
+          Deleting your counselor account permanently removes your profile,
+          webinar activity, session records, feedback, and messages.
+          Articles you published may remain available without your name.
+        </p>
+
+        <p className="mt-3 text-sm font-medium text-red-700">
+          This action cannot be undone.
+        </p>
+
+        <button
+          type="button"
+          onClick={onDeleteAccount}
+          className="mt-6 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+        >
+          Delete My Account
+        </button>
       </div>
     </div>
   );

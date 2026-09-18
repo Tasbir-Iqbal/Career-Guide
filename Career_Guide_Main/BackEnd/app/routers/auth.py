@@ -184,3 +184,27 @@ def get_my_profile(
         "role": current_user.role,
         "created_at": current_user.created_at,
     }
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_my_account(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator accounts cannot be deleted from this page.",
+        )
+
+    try:
+        db.delete(current_user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Your account could not be deleted. Please try again.",
+    )
